@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Antenna Aimer</title>
+<meta name="description" content="Offline compass for aiming a directional antenna at a target bearing.">
+<meta name="theme-color" content="#111418">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #111418; --panel: #1b2027; --line: #2c333d;
+    --fg: #eef1f4; --dim: #8b96a3;
+    --accent: #ffcc33; --good: #3ddc84; --warn: #ff8a3d; --bad: #ff5252;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f5f7; --panel: #ffffff; --line: #d6dbe1;
+      --fg: #0f1418; --dim: #5a6673;
+      --accent: #c78a00; --good: #128a46; --warn: #c45a00; --bad: #c62828;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: max(12px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    -webkit-user-select: none; user-select: none;
+  }
+  main { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 12px; }
+
+  .readout { text-align: center; }
+  .heading { font-size: 72px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -2px; }
+  .heading small { font-size: 32px; color: var(--dim); font-weight: 600; }
+  .sub { color: var(--dim); font-size: 14px; min-height: 20px; }
+
+  .delta {
+    text-align: center; font-size: 34px; font-weight: 700; padding: 10px;
+    border-radius: 12px; background: var(--panel); border: 2px solid var(--line);
+    font-variant-numeric: tabular-nums;
+  }
+  .delta.on   { color: var(--good); border-color: var(--good); }
+  .delta.near { color: var(--accent); border-color: var(--accent); }
+  .delta.far  { color: var(--warn); }
+
+  .dialwrap { position: relative; width: 100%; aspect-ratio: 1; }
+  svg.dial { width: 100%; height: 100%; display: block; }
+  #rose { transition: none; }
+  .lubber { fill: var(--accent); }
+  .ring { fill: var(--panel); stroke: var(--line); stroke-width: 2; }
+  .tick { stroke: var(--dim); }
+  .tick.major { stroke: var(--fg); stroke-width: 3; }
+  .card { fill: var(--fg); font-weight: 700; font-size: 26px; text-anchor: middle; dominant-baseline: central; }
+  .card.n { fill: var(--bad); }
+  .deg { fill: var(--dim); font-size: 13px; text-anchor: middle; dominant-baseline: central; }
+  .target { stroke: var(--good); stroke-width: 6; stroke-linecap: round; }
+  .targetdot { fill: var(--good); }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .row label { flex: 1; color: var(--dim); font-size: 14px; }
+  input[type=number] {
+    width: 96px; font: inherit; font-size: 20px; font-weight: 600; text-align: right;
+    padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--fg); font-variant-numeric: tabular-nums;
+  }
+  button {
+    font: inherit; font-weight: 600; padding: 10px 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: #111; border-color: var(--accent); }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btns button { flex: 1; }
+  .hint { color: var(--dim); font-size: 13px; }
+  .msg { color: var(--warn); font-size: 14px; text-align: center; }
+  .msg:empty { display: none; }
+  a { color: var(--accent); }
+  #start { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <div class="readout">
+    <div class="heading"><span id="hdg">---</span><small>°</small></div>
+    <div class="sub" id="mode">Waiting for compass…</div>
+  </div>
+
+  <div class="delta" id="delta">—</div>
+
+  <div class="dialwrap">
+    <svg class="dial" viewBox="-160 -160 320 320" aria-label="Antenna Aimer compass dial">
+      <circle class="ring" r="150"/>
+      <g id="rose"></g>
+      <polygon class="lubber" points="0,-158 -11,-136 11,-136"/>
+      <line x1="0" y1="-128" x2="0" y2="-96" stroke="var(--accent)" stroke-width="3"/>
+    </svg>
+  </div>
+
+  <div class="msg" id="msg"></div>
+  <button class="primary" id="start">Start compass</button>
+
+  <div class="panel">
+    <div class="row">
+      <label for="target">Target bearing (true °)</label>
+      <input id="target" type="number" min="0" max="359.9" step="0.5" inputmode="decimal">
+    </div>
+    <div class="row">
+      <label for="decl">Declination (° east +, west −)</label>
+      <input id="decl" type="number" min="-30" max="30" step="0.1" inputmode="decimal">
+    </div>
+    <div class="row">
+      <label for="tol">"On target" tolerance (±°)</label>
+      <input id="tol" type="number" min="0.5" max="20" step="0.5" inputmode="decimal">
+    </div>
+    <div class="btns">
+      <button id="settarget">Set target = current</button>
+      <button id="smooth">Smoothing: med</button>
+    </div>
+    <div class="hint">
+      Hold the phone <b>flat</b> and it reads where the top edge points, or hold it <b>upright</b> and it reads where the back camera points.
+      Keep it a few feet from metal masts and brackets. If readings drift, wave the phone in a figure-8.
+      Declination for your location: <a href="https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml#declination" target="_blank" rel="noopener">NOAA calculator</a> (online).
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+  const norm = a => ((a % 360) + 360) % 360;
+  const signed = a => { a = norm(a); return a > 180 ? a - 360 : a; };
+
+  // ---------- settings (persisted per device) ----------
+  const DEFAULTS = { target: 0, decl: 0, tol: 2, smooth: 1 };
+  let cfg = { ...DEFAULTS };
+  try { Object.assign(cfg, JSON.parse(localStorage.getItem('antennaaimer') || '{}')); } catch (e) {}
+  const save = () => { try { localStorage.setItem('antennaaimer', JSON.stringify(cfg)); } catch (e) {} };
+
+  const SMOOTH = [ ['low', 0.35], ['med', 0.15], ['high', 0.06] ];
+  $('target').value = cfg.target; $('decl').value = cfg.decl; $('tol').value = cfg.tol;
+  const showSmooth = () => $('smooth').textContent = 'Smoothing: ' + SMOOTH[cfg.smooth][0];
+  showSmooth();
+
+  for (const k of ['target', 'decl', 'tol']) {
+    $(k).addEventListener('input', () => {
+      const v = parseFloat($(k).value);
+      if (isFinite(v)) { cfg[k] = k === 'target' ? norm(v) : v; save(); drawTarget(); render(); }
+    });
+  }
+  $('smooth').onclick = () => { cfg.smooth = (cfg.smooth + 1) % SMOOTH.length; save(); showSmooth(); };
+  $('settarget').onclick = () => {
+    if (heading == null) return;
+    cfg.target = Math.round(heading * 2) / 2; $('target').value = cfg.target; save(); drawTarget(); render();
+  };
+
+  // ---------- dial ----------
+  const NS = 'http://www.w3.org/2000/svg';
+  const rose = $('rose');
+  const el = (tag, attrs, parent = rose) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    parent.appendChild(e); return e;
+  };
+  for (let a = 0; a < 360; a += 5) {
+    const major = a % 30 === 0, len = major ? 16 : (a % 10 === 0 ? 10 : 6);
+    const s = Math.sin(rad(a)), c = -Math.cos(rad(a));
+    el('line', { x1: s * 148, y1: c * 148, x2: s * (148 - len), y2: c * (148 - len),
+                 class: 'tick' + (major ? ' major' : '') });
+  }
+  [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(([t, a]) => {
+    const g = el('text', { x: Math.sin(rad(a)) * 110, y: -Math.cos(rad(a)) * 110,
+                           class: 'card' + (t === 'N' ? ' n' : '') });
+    g.textContent = t; g.dataset.a = a;
+  });
+  for (let a = 30; a < 360; a += 30) {
+    if (a % 90 === 0) continue;
+    const g = el('text', { x: Math.sin(rad(a)) * 116, y: -Math.cos(rad(a)) * 116, class: 'deg' });
+    g.textContent = a; g.dataset.a = a;
+  }
+  const tgtLine = el('line', { class: 'target', x1: 0, y1: -148, x2: 0, y2: -128 });
+  const tgtDot = el('circle', { class: 'targetdot', r: 7, cx: 0, cy: -148 });
+  function drawTarget() {
+    const s = Math.sin(rad(cfg.target)), c = -Math.cos(rad(cfg.target));
+    tgtLine.setAttribute('x1', s * 148); tgtLine.setAttribute('y1', c * 148);
+    tgtLine.setAttribute('x2', s * 128); tgtLine.setAttribute('y2', c * 128);
+    tgtDot.setAttribute('cx', s * 148);  tgtDot.setAttribute('cy', c * 148);
+  }
+  drawTarget();
+  // keep labels upright as the rose turns
+  const labels = [...rose.querySelectorAll('text')];
+
+  // ---------- sensor math ----------
+  // Device axes expressed in the Earth frame (x=East, y=North, z=Up), from
+  // W3C DeviceOrientation alpha/beta/gamma (intrinsic Z-X'-Y'').
+  let useBack = false; // hysteresis between "flat / top edge" and "upright / back camera"
+  function headingFromEuler(a, b, g) {
+    const cA = Math.cos(rad(a)), sA = Math.sin(rad(a));
+    const cB = Math.cos(rad(b)), sB = Math.sin(rad(b));
+    const cG = Math.cos(rad(g)), sG = Math.sin(rad(g));
+    const X = [cA * cG - sA * sB * sG, sA * cG + cA * sB * sG, -cB * sG]; // device right
+    const Y = [-sA * cB, cA * cB, sB];                                    // device top
+    const Z = [cA * sG + sA * sB * cG, sA * sG - cA * sB * cG, cB * cG];  // out of screen
+    // screen "up" accounts for portrait/landscape rotation
+    const ang = rad((screen.orientation && screen.orientation.angle) || window.orientation || 0);
+    const up = [0, 1, 2].map(i => Math.cos(ang) * Y[i] + Math.sin(ang) * X[i]);
+    const back = [-Z[0], -Z[1], -Z[2]];
+    // pick whichever axis is closer to horizontal (with hysteresis)
+    const tiltUp = Math.abs(up[2]), tiltBack = Math.abs(back[2]);
+    if (useBack && tiltBack > tiltUp + 0.15) useBack = false;
+    else if (!useBack && tiltUp > tiltBack + 0.15) useBack = true;
+    const v = useBack ? back : up;
+    const horiz = Math.hypot(v[0], v[1]);
+    if (horiz < 0.2) return null; // pointing nearly straight up/down
+    return norm(deg(Math.atan2(v[0], v[1])));
+  }
+
+  // ---------- smoothing on the circle ----------
+  let sx = null, sy = null, heading = null, magHeading = null;
+  const recent = [];
+  function feed(magDeg) {
+    const k = SMOOTH[cfg.smooth][1];
+    const x = Math.cos(rad(magDeg)), y = Math.sin(rad(magDeg));
+    if (sx == null) { sx = x; sy = y; } else { sx += (x - sx) * k; sy += (y - sy) * k; }
+    magHeading = norm(deg(Math.atan2(sy, sx)));
+    heading = norm(magHeading + (parseFloat(cfg.decl) || 0));
+    recent.push(magDeg); if (recent.length > 30) recent.shift();
+    if (!lastEvent) { $('start').style.display = 'none'; $('msg').textContent = ''; }
+    lastEvent = performance.now();
+  }
+  function jitter() { // circular std dev of raw readings, degrees
+    if (recent.length < 10) return 0;
+    let c = 0, s = 0;
+    for (const d of recent) { c += Math.cos(rad(d)); s += Math.sin(rad(d)); }
+    const R = Math.hypot(c, s) / recent.length;
+    return deg(Math.sqrt(-2 * Math.log(Math.max(R, 1e-9))));
+  }
+
+  // ---------- render loop ----------
+  let source = '', lastEvent = 0;
+  function render() {
+    if (heading == null) return;
+    $('hdg').textContent = Math.round(heading).toString().padStart(3, '0');
+    rose.setAttribute('transform', `rotate(${-heading})`);
+    for (const t of labels) {
+      t.setAttribute('transform', `rotate(${heading} ${t.getAttribute('x')} ${t.getAttribute('y')})`);
+    }
+    const d = signed(cfg.target - heading), ad = Math.abs(d), tol = Math.max(0.5, parseFloat(cfg.tol) || 2);
+    const box = $('delta');
+    if (ad <= tol) { box.textContent = '● ON TARGET'; box.className = 'delta on'; }
+    else {
+      box.textContent = d > 0 ? `TURN RIGHT ${ad.toFixed(0)}° ▶` : `◀ ${ad.toFixed(0)}° TURN LEFT`;
+      box.className = 'delta ' + (ad <= tol * 4 ? 'near' : 'far');
+    }
+    const j = jitter();
+    $('mode').textContent =
+      (useBack ? 'Upright: back camera direction' : 'Flat: top edge direction') +
+      ` · ${source}` + (j > 4 ? ` · unsteady ±${j.toFixed(0)}°` : '');
+  }
+  (function loop() {
+    render();
+    if (lastEvent && performance.now() - lastEvent > 2000) $('msg').textContent = 'Compass readings stopped. Is the screen locked or the sensor busy?';
+    else if (lastEvent) $('msg').textContent = '';
+    requestAnimationFrame(loop);
+  })();
+
+  // ---------- sensor hookup ----------
+  let gotAbsolute = false;
+  function onAbs(e) {
+    if (e.alpha == null) return;
+    gotAbsolute = true;
+    const h = headingFromEuler(e.alpha, e.beta || 0, e.gamma || 0);
+    if (h != null) { source = 'magnetic sensor'; feed(h); }
+  }
+  function onIOS(e) {
+    if (e.webkitCompassHeading == null) return;
+    gotAbsolute = true;
+    // iOS supplies its own heading; use it as-is
+    useBack = false;
+    source = 'iOS compass'; feed(e.webkitCompassHeading);
+  }
+
+  let listening = false;
+  function startListening() {
+    if (listening) return; listening = true;
+    if ('ondeviceorientationabsolute' in window) {
+      window.addEventListener('deviceorientationabsolute', onAbs);
+    } else {
+      window.addEventListener('deviceorientation', e => {
+        if (e.webkitCompassHeading != null) onIOS(e);
+        else if (e.absolute) onAbs(e);
+      });
+    }
+    setTimeout(() => {
+      if (!gotAbsolute) $('msg').textContent =
+        'No compass data. This device may not have a magnetometer (most Chromebooks and laptops don\'t), or the page isn\'t on HTTPS.';
+    }, 3000);
+    requestWakeLock();
+  }
+
+  // Start right away; if the browser wants a tap to grant permission
+  // (iOS, and some newer Chrome builds), offer a button when no data arrives.
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE) {
+    $('msg').textContent = 'This browser does not support orientation sensors.';
+  } else {
+    startListening();
+    if (typeof DOE.requestPermission === 'function') {
+      setTimeout(() => { if (!gotAbsolute) $('start').style.display = 'block'; }, 800);
+      $('start').onclick = async () => {
+        try {
+          const r = await DOE.requestPermission();
+          if (r === 'granted') { $('start').style.display = 'none'; $('msg').textContent = ''; }
+          else $('msg').textContent = 'Motion permission was denied. Allow it in browser settings and reload.';
+        } catch (err) { $('msg').textContent = 'Could not request motion permission: ' + err.message; }
+      };
+    }
+  }
+
+  // ---------- keep the screen awake ----------
+  let lock = null;
+  async function requestWakeLock() {
+    try { if ('wakeLock' in navigator) lock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') requestWakeLock();
+  });
+
+  // ---------- offline ----------
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+})();
+</script>
+</body>
+</html>
