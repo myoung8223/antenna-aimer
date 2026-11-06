@@ -19,7 +19,7 @@ A simple, offline compass PWA for aiming a directional antenna (such as a UHF TV
 ## Usage
 
 1. Find your target bearing. Antenna sites such as [RabbitEars](https://www.rabbitears.info/) give the azimuth to each station from your address. Bearings use the standard convention: 0° is north, increasing **clockwise** (90° east, 180° south, 270° west).
-2. Enter that bearing as the target. If you're using a true (map) bearing, enter your local magnetic declination (east positive, west negative) from the [NOAA calculator](https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml#declination).
+2. Enter that bearing as the target. If you're using a true (map) bearing, enter your local magnetic declination and tap the **E/W** button to match, using the value from the [NOAA calculator](https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml#declination).
 3. Line the device up with the antenna boom, pointing toward the directors (the short-element end), and turn until the bar reads **ON TARGET**.
 4. For best results, fine-tune with your TV's signal-strength screen, sweeping slowly by about ±15° around the compass heading.
 

@@ -1,5 +1,5 @@
 // Bump VERSION whenever you change any file so phones pick up the update.
-const VERSION = 'antenna-aimer-v3';
+const VERSION = 'antenna-aimer-v4';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 
 self.addEventListener('install', e => {

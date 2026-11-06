@@ -35,7 +35,6 @@
 
   .readout { text-align: center; }
   .heading { font-size: 72px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: -2px; }
-  .heading small { font-size: 32px; color: var(--dim); font-weight: 600; }
   .sub { color: var(--dim); font-size: 14px; min-height: 20px; }
 
   .delta {
@@ -61,11 +60,21 @@
   .targetdot { fill: var(--good); }
 
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
-  .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .fields { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 8px; }
   .field { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .unit { position: relative; width: 100%; max-width: 110px; }
+  .unit input[type=number] { width: 100%; max-width: none; padding-left: 4px; padding-right: 17px; }
+  .unit::after {
+    content: "°"; position: absolute; right: 6px; top: 50%; transform: translateY(-58%);
+    font-size: 20px; font-weight: 600; color: var(--dim); pointer-events: none;
+  }
+  .declrow .unit { flex: 1; min-width: 0; }
+  .declrow { display: flex; gap: 4px; width: 100%; max-width: 130px; }
+  .declrow input { min-width: 0; flex: 1; }
+  #declDir { padding: 6px 0; width: 32px; flex: none; font-size: 18px; }
   .field label { color: var(--dim); font-size: 13px; text-align: center; }
   input[type=number] {
-    width: 100%; max-width: 110px; font: inherit; font-size: 20px; font-weight: 600; text-align: center;
+    width: 100%; max-width: 110px; font: inherit; font-size: 20px; font-weight: 600; text-align: right; padding-right: 24px;
     padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--bg); color: var(--fg); font-variant-numeric: tabular-nums;
   }
@@ -89,7 +98,7 @@
 <body>
 <main>
   <div class="readout">
-    <div class="heading"><span id="hdg">---</span><small>°</small></div>
+    <div class="heading" id="hdg">---</div>
     <div class="sub" id="mode">Waiting for compass…</div>
   </div>
 
@@ -110,15 +119,18 @@
   <div class="panel">
     <div class="fields">
       <div class="field">
-        <input id="target" type="number" min="0" max="359.9" step="any" inputmode="decimal">
+        <div class="unit"><input id="target" type="number" min="0" max="359.9" step="any" inputmode="decimal"></div>
         <label for="target">Target bearing</label>
       </div>
       <div class="field">
-        <input id="decl" type="number" min="-30" max="30" step="any">
+        <div class="declrow">
+          <div class="unit"><input id="decl" type="number" min="0" max="30" step="any" inputmode="decimal"></div>
+          <button id="declDir" type="button" aria-label="Toggle east or west declination">W</button>
+        </div>
         <label for="decl">Declination</label>
       </div>
       <div class="field">
-        <input id="tol" type="number" min="0.5" max="20" step="any" inputmode="decimal">
+        <div class="unit"><input id="tol" type="number" min="0.5" max="20" step="any" inputmode="decimal"></div>
         <label for="tol">Target tolerance</label>
       </div>
     </div>
@@ -142,17 +154,29 @@
   const signed = a => { a = norm(a); return a > 180 ? a - 360 : a; };
 
   // ---------- settings (persisted per device) ----------
-  const DEFAULTS = { target: 0, decl: 0, tol: 2, smooth: 1 };
+  const DEFAULTS = { target: 0, decl: 0, declW: true, tol: 2, smooth: 1 };
   let cfg = { ...DEFAULTS };
   try { Object.assign(cfg, JSON.parse(localStorage.getItem('antennaaimer') || '{}')); } catch (e) {}
   const save = () => { try { localStorage.setItem('antennaaimer', JSON.stringify(cfg)); } catch (e) {} };
 
   const SMOOTH = [ ['low', 0.35], ['med', 0.15], ['high', 0.06] ];
-  $('target').value = cfg.target; $('decl').value = cfg.decl; $('tol').value = cfg.tol;
+    // Declination is entered as a positive number plus an E/W toggle, like NOAA shows it
+  // (many Android number keypads have no minus key). Stored signed: west negative.
+  if (cfg.decl < 0) cfg.declW = true; else if (cfg.decl > 0) cfg.declW = false;
+  $('target').value = cfg.target; $('decl').value = Math.abs(cfg.decl); $('tol').value = cfg.tol;
+  const showDir = () => $('declDir').textContent = cfg.declW ? 'W' : 'E';
+  showDir();
+  const setDecl = () => {
+    const v = Math.abs(parseFloat($('decl').value));
+    cfg.decl = isFinite(v) ? (cfg.declW ? -v : v) : 0;
+    save(); render();
+  };
+  $('decl').addEventListener('input', setDecl);
+  $('declDir').onclick = () => { cfg.declW = !cfg.declW; showDir(); setDecl(); };
   const showSmooth = () => $('smooth').textContent = 'Smoothing: ' + SMOOTH[cfg.smooth][0];
   showSmooth();
 
-  for (const k of ['target', 'decl', 'tol']) {
+  for (const k of ['target', 'tol']) {
     $(k).addEventListener('input', () => {
       const v = parseFloat($(k).value);
       if (isFinite(v)) { cfg[k] = k === 'target' ? norm(v) : v; save(); drawTarget(); render(); }
@@ -262,7 +286,7 @@
   let source = '', lastEvent = 0;
   function render() {
     if (heading == null) return;
-    $('hdg').textContent = String(Math.round(heading) % 360);
+    $('hdg').textContent = (Math.round(heading) % 360) + '°';
     rose.setAttribute('transform', `rotate(${-heading})`);
     for (const t of labels) {
       t.setAttribute('transform', `rotate(${heading} ${t.getAttribute('x')} ${t.getAttribute('y')})`);
